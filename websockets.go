@@ -7,7 +7,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 )
+
+var wg sync.WaitGroup
 
 type Connection struct {
 	Key string
@@ -25,6 +28,14 @@ func (conn Connection) GenerateKey() string {
 
 func (conn Connection) HandleCommunication(c net.Conn) {
 	defer c.Close()
+	defer wg.Wait()
+
+	wg.Add(1)
+	go receiveMessage(c)
+}
+
+func receiveMessage(c net.Conn) {
+	defer wg.Done()
 
 	configurationBytesBuffer := make([]byte, 2)
 	for {
