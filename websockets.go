@@ -67,21 +67,17 @@ func getPayloadLengthAndMask(configurationBytesBuffer []byte, c net.Conn) (uint6
 		if _, err := io.ReadFull(c, payloadLengthSlice); err != nil {
 			return 0, []byte{}, err
 		}
-		payloadLength += uint64(payloadLengthSlice[0]) << 8
-		payloadLength += uint64(payloadLengthSlice[1])
+		for i, b := range payloadLengthSlice {
+			payloadLength += uint64(b) << ((len(payloadLengthSlice) - i - 1) * 8)
+		}
 	} else {
 		payloadLengthSlice := make([]byte, 8)
 		if _, err := io.ReadFull(c, payloadLengthSlice); err != nil {
 			return 0, []byte{}, err
 		}
-		payloadLength += uint64(payloadLengthSlice[0]) << 56
-		payloadLength += uint64(payloadLengthSlice[1]) << 48
-		payloadLength += uint64(payloadLengthSlice[2]) << 40
-		payloadLength += uint64(payloadLengthSlice[3]) << 32
-		payloadLength += uint64(payloadLengthSlice[4]) << 24
-		payloadLength += uint64(payloadLengthSlice[5]) << 16
-		payloadLength += uint64(payloadLengthSlice[6]) << 8
-		payloadLength += uint64(payloadLengthSlice[7])
+		for i, b := range payloadLengthSlice {
+			payloadLength += uint64(b) << ((len(payloadLengthSlice) - i - 1) * 8)
+		}
 	}
 	if _, err := io.ReadFull(c, mask); err != nil {
 		return 0, []byte{}, err
