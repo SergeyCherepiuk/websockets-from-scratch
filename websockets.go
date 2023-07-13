@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/base64"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -25,58 +26,81 @@ func (conn Connection) GenerateKey() string {
 func (conn Connection) HandleCommunication(c net.Conn) {
 	defer c.Close()
 
-	buffer := make([]byte, 1024)
-	receiveChannel := make(chan []byte)
-	go conn.receiveMessage(receiveChannel)
+	configurationBytesBuffer := make([]byte, 2)
 	for {
-		n, err := c.Read(buffer)
+		// Read first two configuration bytes
+		_, err := io.ReadFull(c, configurationBytesBuffer)
 		if err != nil {
 			log.Println(err.Error())
-			return
+			continue
 		}
-		receiveChannel <- buffer[:n]
-	}
-}
 
-func (conn Connection) receiveMessage(ch chan []byte) {
-	for {
-		buffer := <-ch
-		payloadLength, maskStart := conn.getPayloadLengthAndMaskStart(buffer)
-		message := conn.decodeFrame(buffer, payloadLength, maskStart)
+		// Determine payload length and mask
+		payloadLength, mask, err := getPayloadLengthAndMask(configurationBytesBuffer, c)
+		if err != nil {
+			log.Println(err.Error())
+			continue
+		}
+
+		// Read payload
+		payload, err := readPayload(payloadLength, c)
+		if err != nil {
+			log.Println(err.Error())
+			continue
+		}
+
+		// Decode payload using XOR encryption
+		message := decodePayload(payload, mask)
 		log.Println(message)
 	}
 }
 
-func (conn Connection) getPayloadLengthAndMaskStart(buffer []byte) (uint64, byte) {
+func getPayloadLengthAndMask(configurationBytesBuffer []byte, c net.Conn) (uint64, []byte, error) {
+	secondByte := uint(configurationBytesBuffer[1])
+	mask := make([]byte, 4)
+
 	var payloadLength uint64
-	var maskStart byte
-	if uint64(buffer[1])-128 < 126 {
-		payloadLength = uint64(buffer[1]) - 128
-		maskStart = 2
-	} else if uint64(buffer[1])-128 == 126 {
-		payloadLength += uint64(buffer[3]) << 8
-		payloadLength += uint64(buffer[2])
-		maskStart = 4
+	if secondByte-128 < 126 {
+		payloadLength = uint64(secondByte) - 128
+	} else if secondByte-128 == 126 {
+		payloadLengthSlice := make([]byte, 2)
+		if _, err := io.ReadFull(c, payloadLengthSlice); err != nil {
+			return 0, []byte{}, err
+		}
+		payloadLength += uint64(payloadLengthSlice[0]) << 8
+		payloadLength += uint64(payloadLengthSlice[1])
 	} else {
-		payloadLength += uint64(buffer[9]) << 56
-		payloadLength += uint64(buffer[8]) << 48
-		payloadLength += uint64(buffer[7]) << 40
-		payloadLength += uint64(buffer[6]) << 32
-		payloadLength += uint64(buffer[5]) << 24
-		payloadLength += uint64(buffer[4]) << 16
-		payloadLength += uint64(buffer[3]) << 8
-		payloadLength += uint64(buffer[2])
-		maskStart = 10
+		payloadLengthSlice := make([]byte, 8)
+		if _, err := io.ReadFull(c, payloadLengthSlice); err != nil {
+			return 0, []byte{}, err
+		}
+		payloadLength += uint64(payloadLengthSlice[0]) << 56
+		payloadLength += uint64(payloadLengthSlice[1]) << 48
+		payloadLength += uint64(payloadLengthSlice[2]) << 40
+		payloadLength += uint64(payloadLengthSlice[3]) << 32
+		payloadLength += uint64(payloadLengthSlice[4]) << 24
+		payloadLength += uint64(payloadLengthSlice[5]) << 16
+		payloadLength += uint64(payloadLengthSlice[6]) << 8
+		payloadLength += uint64(payloadLengthSlice[7])
 	}
-	return payloadLength, maskStart
+	if _, err := io.ReadFull(c, mask); err != nil {
+		return 0, []byte{}, err
+	}
+	return payloadLength, mask, nil
 }
 
-func (conn Connection) decodeFrame(buffer []byte, payloadLength uint64, maskStart byte) string {
-	mask := buffer[maskStart : maskStart+4]
-	message := make([]byte, payloadLength)
-	for i := 0; i < int(payloadLength); i++ {
-		char := buffer[i+int(maskStart)+4] ^ mask[i%4]
-		message = append(message, char)
+func readPayload(payloadLength uint64, c net.Conn) (string, error) {
+	payload := make([]byte, payloadLength)
+	if _, err := io.ReadFull(c, payload); err != nil {
+		return "", err
+	}
+	return string(payload), nil
+}
+
+func decodePayload(payload string, mask []byte) string {
+	message := make([]byte, len(payload))
+	for i := 0; i < len(payload); i++ {
+		message = append(message, payload[i]^mask[i%4])
 	}
 	return string(message)
 }
