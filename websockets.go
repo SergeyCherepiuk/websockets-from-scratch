@@ -50,6 +50,13 @@ func receiveMessage(c net.Conn) {
 			continue
 		}
 
+		// Check if frame is masked
+		if isMasked := checkIfMasked(configurationBytesBuffer); !isMasked {
+			closeFrame := createCloseFrame("Frame was not masked. Disconnecting...", 1003)
+			c.Write(closeFrame)
+			continue
+		}
+
 		// Determine payload length and mask
 		payloadLength, mask, err := getPayloadLengthAndMask(configurationBytesBuffer, c)
 		if err != nil {
@@ -98,6 +105,11 @@ func sendingMessage(c net.Conn) {
 }
 
 // Receiving messages functions
+func checkIfMasked(configurationBytesBuffer []byte) bool {
+	secondByte := int(configurationBytesBuffer[1])
+	return secondByte-128 >= 0
+}
+
 func getPayloadLengthAndMask(configurationBytesBuffer []byte, c net.Conn) (uint64, []byte, error) {
 	secondByte := uint(configurationBytesBuffer[1])
 	mask := make([]byte, 4)
@@ -170,4 +182,16 @@ func createFrame(message string, payloadLength []byte) []byte {
 	frame = append(frame, 0b10000001)
 	frame = append(frame, payloadLength...)
 	return append(frame, message...)
+}
+
+// Common functions for both receiving and sending messages
+func createCloseFrame(message string, statusCode uint16) []byte {
+	frame := make([]byte, 0, 2+2+len(message))
+	frame = append(frame, 0b10001000) // opcode=0x8
+	frame = append(frame, byte(len(message)))
+	frame = append(frame, byte(statusCode>>8&0xFF))
+	frame = append(frame, byte(statusCode&0xFF))
+	frame = append(frame, message...)
+	log.Println(frame)
+	return frame
 }
