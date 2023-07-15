@@ -4,6 +4,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/SergeyCherepiuk/websockets-test/websockets"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
@@ -25,7 +26,7 @@ func main() {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
-		conn := NewConnection(key)
+		conn := websockets.NewConnection(key)
 		c.Set("Upgrade", "websocket")
 		c.Set("Connection", "Upgrade")
 		c.Set("Sec-WebSocket-Accept", conn.GenerateKey())
