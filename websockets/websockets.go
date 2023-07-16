@@ -1,11 +1,13 @@
 package websockets
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -31,6 +33,9 @@ func (conn Connection) HandleCommunication(c net.Conn) {
 
 	wg.Add(1)
 	go receiveMessage(c)
+
+	wg.Add(1)
+	go sendMessage(c)
 }
 
 func receiveMessage(c net.Conn) {
@@ -53,21 +58,26 @@ func receiveMessage(c net.Conn) {
 	}
 }
 
-// func createFrame(message string, payloadLength []byte) []byte {
-// 	frame := make([]byte, 0, 1+len(payloadLength)+len(message))
-// 	frame = append(frame, 0b10000001)
-// 	frame = append(frame, payloadLength...)
-// 	return append(frame, message...)
-// }
+func sendMessage(c net.Conn) {
+	defer wg.Done()
 
-// // Common functions for both receiving and sending messages
-// func createCloseFrame(message string, statusCode uint16) []byte {
-// 	frame := make([]byte, 0, 2+2+len(message))
-// 	frame = append(frame, 0b10001000) // opcode=0x8
-// 	frame = append(frame, byte(len(message)))
-// 	frame = append(frame, byte(statusCode>>8&0xFF))
-// 	frame = append(frame, byte(statusCode&0xFF))
-// 	frame = append(frame, message...)
-// 	log.Println(frame)
-// 	return frame
-// }
+	for {
+		message, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
+		message = strings.TrimSpace(message)
+
+		frame := Frame{
+			FIN:     true,
+			Opcode:  0x1,
+			Payload: []byte(message),
+		}
+
+		if _, err := c.Write(frame.Bytes()); err != nil {
+			log.Println(err.Error())
+			return
+		}
+	}
+}

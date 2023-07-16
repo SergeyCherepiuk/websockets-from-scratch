@@ -7,10 +7,14 @@ import (
 )
 
 type Frame struct {
-	FIN     bool
-	Opcode  byte
-	Mask    [4]byte
-	Payload []byte
+	FIN      bool
+	RSV1     bool
+	RSV2     bool
+	RSV3     bool
+	Opcode   byte
+	IsMasked bool
+	Mask     []byte
+	Payload  []byte
 }
 
 func ReadFrame(c net.Conn) (Frame, error) {
@@ -35,10 +39,14 @@ func ReadFrame(c net.Conn) (Frame, error) {
 	}
 
 	frame := Frame{
-		FIN:     getFIN(configurationBytes),
-		Opcode:  getOpcode(configurationBytes),
-		Mask:    [4]byte(mask),
-		Payload: payload,
+		FIN:      getFIN(configurationBytes),
+		RSV1:     getRSV1(configurationBytes),
+		RSV2:     getRSV2(configurationBytes),
+		RSV3:     getRSV3(configurationBytes),
+		IsMasked: getIsMasked(configurationBytes),
+		Opcode:   getOpcode(configurationBytes),
+		Mask:     mask,
+		Payload:  payload,
 	}
 	return frame, nil
 }
@@ -68,8 +76,24 @@ func getFIN(configurationBytes []byte) bool {
 	return (configurationBytes[0]>>7)&0b1 == 1
 }
 
+func getRSV1(configurationBytes []byte) bool {
+	return (configurationBytes[0]>>6)&0b1 == 1
+}
+
+func getRSV2(configurationBytes []byte) bool {
+	return (configurationBytes[0]>>5)&0b1 == 1
+}
+
+func getRSV3(configurationBytes []byte) bool {
+	return (configurationBytes[0]>>4)&0b1 == 1
+}
+
 func getOpcode(configurationBytes []byte) byte {
 	return configurationBytes[0] & 0b1111
+}
+
+func getIsMasked(configurationBytes []byte) bool {
+	return (configurationBytes[1]>>7)&0b1 == 1
 }
 
 func (frame Frame) Decode() (string, error) {
@@ -82,4 +106,49 @@ func (frame Frame) Decode() (string, error) {
 		message = append(message, frame.Payload[i]^frame.Mask[i%4])
 	}
 	return string(message), nil
+}
+
+func (frame Frame) Bytes() []byte {
+	bytes := []byte{}
+
+	var firstByte byte
+	if frame.FIN {
+		firstByte += 1 << 7
+	}
+	if frame.RSV1 {
+		firstByte += 1 << 6
+	}
+	if frame.RSV2 {
+		firstByte += 1 << 5
+	}
+	if frame.RSV3 {
+		firstByte += 1 << 4
+	}
+	firstByte += frame.Opcode
+
+	var secondByte byte
+	if frame.IsMasked {
+		secondByte += 1 << 7
+	}
+	var extendedPayloadLength byte
+	if len(frame.Payload) < 126 {
+		extendedPayloadLength = 0
+		secondByte += byte(len(frame.Payload))
+	} else if len(frame.Payload) < 65536 {
+		extendedPayloadLength = 2
+		secondByte += 126
+	} else {
+		extendedPayloadLength = 8
+		secondByte += 127
+	}
+	extendedPayloadLengthSlice := make([]byte, extendedPayloadLength)
+	for i := range extendedPayloadLengthSlice {
+		extendedPayloadLengthSlice[i] = byte(len(frame.Payload) >> (int(extendedPayloadLength) - i - 1) & 0xFF)
+	}
+
+	bytes = append(bytes, firstByte, secondByte)
+	bytes = append(bytes, extendedPayloadLengthSlice...)
+	bytes = append(bytes, frame.Mask...)
+	bytes = append(bytes, frame.Payload...)
+	return bytes
 }
