@@ -25,24 +25,24 @@ func (err UnmaskedFrame) Error() string {
 	return err.message
 }
 
-func ReadFrame(c net.Conn) (Frame, error) {
+func ReadFrame(conn net.Conn) (Frame, error) {
 	configurationBytes := make([]byte, 2)
-	if _, err := io.ReadFull(c, configurationBytes); err != nil {
+	if _, err := io.ReadFull(conn, configurationBytes); err != nil {
 		return Frame{}, err
 	}
 
-	paylaodLength, err := getPayloadLength(c, configurationBytes[1])
+	paylaodLength, err := getPayloadLength(conn, configurationBytes[1])
 	if err != nil {
 		return Frame{}, err
 	}
 
 	mask := make([]byte, 4)
-	if _, err := io.ReadFull(c, mask); err != nil {
+	if _, err := io.ReadFull(conn, mask); err != nil {
 		return Frame{}, err
 	}
 
 	payload := make([]byte, paylaodLength)
-	if _, err := io.ReadFull(c, payload); err != nil {
+	if _, err := io.ReadFull(conn, payload); err != nil {
 		return Frame{}, err
 	}
 

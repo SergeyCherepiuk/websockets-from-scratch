@@ -8,48 +8,57 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 )
 
-var wg sync.WaitGroup
-
-type Connection struct {
-	Key string
-}
-
-func NewConnection(key string) Connection {
-	return Connection{Key: key}
-}
-
-func (conn Connection) GenerateKey() string {
+func GenerateKey(clientKey string) string {
 	secretKey := os.Getenv("WEBSOCKETS_SECRET_KEY")
-	hash := sha1.Sum(append([]byte(conn.Key), secretKey...))
+	hash := sha1.Sum(append([]byte(clientKey), secretKey...))
 	return base64.StdEncoding.EncodeToString(hash[:])
 }
 
-func (conn Connection) HandleCommunication(c net.Conn) {
-	defer c.Close()
+var connections []Connection
 
-	running := make(chan bool)
-
-	wg.Add(1)
-	go receiveMessage(c, running)
-
-	wg.Add(1)
-	go sendMessage(c, running)
-
-	wg.Wait()
+type Connection struct {
+	ClientKey string
+	Conn      net.Conn
+	running   chan bool
+	input     chan string
 }
 
-func receiveMessage(c net.Conn, running chan bool) {
-	defer wg.Done()
+func NewConnection(hijackedConn net.Conn, clientKey string) *Connection {
+	conn := Connection{
+		Conn:      hijackedConn,
+		ClientKey: clientKey,
+		running:   make(chan bool),
+		input:     make(chan string),
+	}
+	connections = append(connections, conn)
+	return &conn
+}
 
+func (conn Connection) Close() {
+	for i, c := range connections {
+		if c == conn {
+			connections = append(connections[:i], connections[i+1:]...)
+		}
+	}
+	conn.Conn.Close()
+	close(conn.running)
+}
+
+func (conn Connection) HandleConnection() {
+	go conn.receiveMessage()
+	go conn.sendMessage()
+	<-conn.running
+}
+
+func (conn Connection) receiveMessage() {
 	for {
 		select {
-		case <-running:
+		case <-conn.running:
 			return
 		default:
-			frame, err := ReadFrame(c)
+			frame, err := ReadFrame(conn.Conn)
 			if err != nil {
 				switch err.(type) {
 				case *UnmaskedFrame:
@@ -58,58 +67,68 @@ func receiveMessage(c net.Conn, running chan bool) {
 						Opcode:  0x8,
 						Payload: []byte{0b11, 0b11101010}, // 1002
 					}
-					if _, err := c.Write(closeFrame.Bytes()); err != nil {
+					if _, err := conn.Conn.Write(closeFrame.Bytes()); err != nil {
 						log.Println(err.Error())
 					}
-					close(running)
+					conn.Close()
 				default:
 					log.Println(err.Error())
-					close(running)
+					conn.Close()
 				}
 			}
 
 			message, err := frame.Decode()
 			if err != nil {
 				log.Println(err.Error())
-				close(running)
+				conn.Close()
 			}
 
-			log.Println(message)
+			frameToClient := Frame{
+				FIN:     true,
+				Opcode:  0x1,
+				Payload: []byte(message),
+			}
+			for _, c := range connections {
+				if c != conn {
+					if _, err := c.Conn.Write(frameToClient.Bytes()); err != nil {
+						log.Println(err.Error())
+						conn.Close()
+					}
+				}
+			}
 		}
 	}
 }
 
-func sendMessage(c net.Conn, running chan bool) {
-	defer wg.Done()
-
-	userInput := make(chan string)
-	go readUserInput(userInput, running)
+func (conn Connection) sendMessage() {
+	go conn.readUserInput()
 	for {
 		select {
-		case <-running:
+		case <-conn.running:
 			return
-		case message := <-userInput:
+		default:
+			message := <-conn.input
 			frame := Frame{
 				FIN:     true,
 				Opcode:  0x1,
 				Payload: []byte(message),
 			}
 
-			if _, err := c.Write(frame.Bytes()); err != nil {
+			if _, err := conn.Conn.Write(frame.Bytes()); err != nil {
 				log.Println(err.Error())
-				close(running)
+				conn.Close()
 			}
 		}
 	}
 }
 
-func readUserInput(userInputs chan<- string, running chan<- bool) {
+func (conn Connection) readUserInput() {
 	for {
 		message, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println(err.Error())
-			close(running)
+			conn.Close()
 		}
-		userInputs <- strings.TrimSpace(message)
+		conn.input <- strings.TrimSpace(message)
 	}
 }

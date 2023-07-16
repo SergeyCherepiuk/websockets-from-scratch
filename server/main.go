@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"strings"
 
 	"github.com/SergeyCherepiuk/websockets-test/websockets"
@@ -21,17 +22,20 @@ func main() {
 	app.Use(logger.New())
 
 	app.Get("/chat", func(c *fiber.Ctx) error {
-		key := strings.TrimSpace(c.Get("Sec-WebSocket-Key", ""))
-		if key == "" {
+		clientKey := strings.TrimSpace(c.Get("Sec-WebSocket-Key", ""))
+		if clientKey == "" {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
-		conn := websockets.NewConnection(key)
 		c.Set("Upgrade", "websocket")
 		c.Set("Connection", "Upgrade")
-		c.Set("Sec-WebSocket-Accept", conn.GenerateKey())
+		c.Set("Sec-WebSocket-Accept", websockets.GenerateKey(clientKey))
 
-		c.Context().Hijack(conn.HandleCommunication)
+		c.Context().Hijack(func(hijackedConn net.Conn) {
+			conn := websockets.NewConnection(hijackedConn, clientKey)
+			conn.HandleConnection()
+		})
+
 		return c.SendStatus(fiber.StatusSwitchingProtocols)
 	})
 
