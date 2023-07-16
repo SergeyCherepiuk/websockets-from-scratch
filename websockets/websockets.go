@@ -29,55 +29,87 @@ func (conn Connection) GenerateKey() string {
 
 func (conn Connection) HandleCommunication(c net.Conn) {
 	defer c.Close()
-	defer wg.Wait()
+
+	running := make(chan bool)
 
 	wg.Add(1)
-	go receiveMessage(c)
+	go receiveMessage(c, running)
 
 	wg.Add(1)
-	go sendMessage(c)
+	go sendMessage(c, running)
+
+	wg.Wait()
 }
 
-func receiveMessage(c net.Conn) {
+func receiveMessage(c net.Conn, running chan bool) {
 	defer wg.Done()
 
 	for {
-		frame, err := ReadFrame(c)
-		if err != nil {
-			log.Println(err.Error())
+		select {
+		case <-running:
 			return
-		}
+		default:
+			frame, err := ReadFrame(c)
+			if err != nil {
+				switch err.(type) {
+				case *UnmaskedFrame:
+					closeFrame := Frame{
+						FIN:     true,
+						Opcode:  0x8,
+						Payload: []byte{0b11, 0b11101010}, // 1002
+					}
+					if _, err := c.Write(closeFrame.Bytes()); err != nil {
+						log.Println(err.Error())
+					}
+					close(running)
+				default:
+					log.Println(err.Error())
+					close(running)
+				}
+			}
 
-		message, err := frame.Decode()
-		if err != nil {
-			log.Println(err.Error())
-			return
-		}
+			message, err := frame.Decode()
+			if err != nil {
+				log.Println(err.Error())
+				close(running)
+			}
 
-		log.Println(message)
+			log.Println(message)
+		}
 	}
 }
 
-func sendMessage(c net.Conn) {
+func sendMessage(c net.Conn, running chan bool) {
 	defer wg.Done()
 
+	userInput := make(chan string)
+	go readUserInput(userInput, running)
+	for {
+		select {
+		case <-running:
+			return
+		case message := <-userInput:
+			frame := Frame{
+				FIN:     true,
+				Opcode:  0x1,
+				Payload: []byte(message),
+			}
+
+			if _, err := c.Write(frame.Bytes()); err != nil {
+				log.Println(err.Error())
+				close(running)
+			}
+		}
+	}
+}
+
+func readUserInput(userInputs chan<- string, running chan<- bool) {
 	for {
 		message, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println(err.Error())
-			return
+			close(running)
 		}
-		message = strings.TrimSpace(message)
-
-		frame := Frame{
-			FIN:     true,
-			Opcode:  0x1,
-			Payload: []byte(message),
-		}
-
-		if _, err := c.Write(frame.Bytes()); err != nil {
-			log.Println(err.Error())
-			return
-		}
+		userInputs <- strings.TrimSpace(message)
 	}
 }

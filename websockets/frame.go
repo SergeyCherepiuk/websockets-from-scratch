@@ -17,6 +17,14 @@ type Frame struct {
 	Payload  []byte
 }
 
+type UnmaskedFrame struct {
+	message string
+}
+
+func (err UnmaskedFrame) Error() string {
+	return err.message
+}
+
 func ReadFrame(c net.Conn) (Frame, error) {
 	configurationBytes := make([]byte, 2)
 	if _, err := io.ReadFull(c, configurationBytes); err != nil {
@@ -48,6 +56,11 @@ func ReadFrame(c net.Conn) (Frame, error) {
 		Mask:     mask,
 		Payload:  payload,
 	}
+
+	if !frame.IsMasked {
+		return Frame{}, UnmaskedFrame{"Received frame isn't masked"}
+	}
+
 	return frame, nil
 }
 
