@@ -5,7 +5,7 @@ Just <s>struggling</s> playing around with WebSockets
 Run this beauty 🤙🤙🤙
 
 ```shell
-go run main.go websockets.go
+go run server/main.go
 ```
 
 Watch this delicious peace of code in action 😎
