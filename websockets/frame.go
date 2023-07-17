@@ -3,6 +3,7 @@ package websockets
 import (
 	"errors"
 	"io"
+	"log"
 	"net"
 )
 
@@ -17,18 +18,17 @@ type Frame struct {
 	Payload  []byte
 }
 
-type UnmaskedFrame struct {
-	message string
-}
-
-func (err UnmaskedFrame) Error() string {
-	return err.message
-}
+var ErrUnmaskedFrame = errors.New("received frame isn't masked")
 
 func ReadFrame(conn net.Conn) (Frame, error) {
 	configurationBytes := make([]byte, 2)
 	if _, err := io.ReadFull(conn, configurationBytes); err != nil {
 		return Frame{}, err
+	}
+
+	isMasked := getIsMasked(configurationBytes)
+	if !isMasked {
+		return Frame{}, ErrUnmaskedFrame
 	}
 
 	paylaodLength, err := getPayloadLength(conn, configurationBytes[1])
@@ -51,14 +51,10 @@ func ReadFrame(conn net.Conn) (Frame, error) {
 		RSV1:     getRSV1(configurationBytes),
 		RSV2:     getRSV2(configurationBytes),
 		RSV3:     getRSV3(configurationBytes),
-		IsMasked: getIsMasked(configurationBytes),
+		IsMasked: isMasked,
 		Opcode:   getOpcode(configurationBytes),
 		Mask:     mask,
 		Payload:  payload,
-	}
-
-	if !frame.IsMasked {
-		return Frame{}, UnmaskedFrame{"Received frame isn't masked"}
 	}
 
 	return frame, nil
@@ -143,25 +139,38 @@ func (frame Frame) Bytes() []byte {
 	if frame.IsMasked {
 		secondByte += 1 << 7
 	}
-	var extendedPayloadLength byte
+	var extendedPayloadLengthSize byte
 	if len(frame.Payload) < 126 {
-		extendedPayloadLength = 0
+		extendedPayloadLengthSize = 0
 		secondByte += byte(len(frame.Payload))
 	} else if len(frame.Payload) < 65536 {
-		extendedPayloadLength = 2
+		extendedPayloadLengthSize = 2
 		secondByte += 126
 	} else {
-		extendedPayloadLength = 8
+		extendedPayloadLengthSize = 8
 		secondByte += 127
 	}
-	extendedPayloadLengthSlice := make([]byte, extendedPayloadLength)
-	for i := range extendedPayloadLengthSlice {
-		extendedPayloadLengthSlice[i] = byte(len(frame.Payload) >> (int(extendedPayloadLength) - i - 1) & 0xFF)
+	extendedPayloadLength := make([]byte, extendedPayloadLengthSize)
+	for i := range extendedPayloadLength {
+		extendedPayloadLength[i] = byte(len(frame.Payload) >> (int(extendedPayloadLengthSize) - i - 1) & 0xFF)
 	}
 
 	bytes = append(bytes, firstByte, secondByte)
-	bytes = append(bytes, extendedPayloadLengthSlice...)
+	bytes = append(bytes, extendedPayloadLength...)
 	bytes = append(bytes, frame.Mask...)
 	bytes = append(bytes, frame.Payload...)
 	return bytes
+}
+
+func (conn Connection) sendCloseFrame(statusCode int) {
+	firstByte := byte(statusCode >> 8 & 0xFF)
+	secondByte := byte(statusCode & 0xFF)
+	closeFrame := Frame{
+		FIN:     true,
+		Opcode:  0x8,
+		Payload: []byte{firstByte, secondByte},
+	}
+	if _, err := conn.Conn.Write(closeFrame.Bytes()); err != nil {
+		log.Println(err.Error())
+	}
 }
