@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"os"
+	"reflect"
 )
 
 func GenerateKey(clientKey string) string {
@@ -19,7 +20,7 @@ type Connection struct {
 	ClientKey string
 	Conn      net.Conn
 	running   chan bool
-	input     chan string
+	queue     FrameQueue
 }
 
 func NewConnection(hijackedConn net.Conn, clientKey string) *Connection {
@@ -27,7 +28,7 @@ func NewConnection(hijackedConn net.Conn, clientKey string) *Connection {
 		Conn:      hijackedConn,
 		ClientKey: clientKey,
 		running:   make(chan bool),
-		input:     make(chan string),
+		queue:     FrameQueue{},
 	}
 	connections = append(connections, conn)
 	return &conn
@@ -35,7 +36,7 @@ func NewConnection(hijackedConn net.Conn, clientKey string) *Connection {
 
 func (conn Connection) Close() {
 	for i, c := range connections {
-		if c == conn {
+		if reflect.DeepEqual(c, conn) {
 			connections = append(connections[:i], connections[i+1:]...)
 		}
 	}
