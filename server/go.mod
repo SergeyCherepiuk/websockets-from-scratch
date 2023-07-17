@@ -1,4 +1,4 @@
-module github.com/SergeyCherepiuk/websockets-test/server
+module github.com/SergeyCherepiuk/websockets-from-scratch/server
 
 go 1.20
 

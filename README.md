@@ -1,4 +1,4 @@
-# Websockets-test
+# Websockets-from-scratch
 
 Just <s>struggling</s> playing around with WebSockets
 
