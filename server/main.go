@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/SergeyCherepiuk/websockets-test/websockets"
+	"github.com/SergeyCherepiuk/websockets-from-scratch/websockets"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
