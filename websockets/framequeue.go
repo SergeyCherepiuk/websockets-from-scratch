@@ -1,18 +1,17 @@
 package websockets
 
-import "errors"
-
 type FrameQueue []Frame
 
 func (queue *FrameQueue) Enqueue(frame Frame) {
 	*queue = append(*queue, frame)
 }
 
-func (queue *FrameQueue) Dequeue() (Frame, error) {
+// Returns first frame from the queue and boolean flag "ok"
+func (queue *FrameQueue) Dequeue() (Frame, bool) {
 	if len(*queue) < 1 {
-		return Frame{}, errors.New("queue is empty")
+		return Frame{}, false
 	}
 	frame := (*queue)[0]
 	*queue = (*queue)[1:]
-	return frame, nil
+	return frame, true
 }
